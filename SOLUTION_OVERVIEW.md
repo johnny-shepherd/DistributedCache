@@ -66,11 +66,13 @@ API gets hit only ONCE! ✅
 
 ## Features
 
-✅ **Distributed Lock-Based Caching**: Prevents cache stampede across multiple service instances  
-✅ **Flexible Key Generation**: Supports both SpEL expressions and custom `KeyGenerator` beans  
-✅ **Spring-Compatible API**: Familiar syntax for developers using Spring's `@Cacheable`  
-✅ **Configurable Timeouts**: Lock wait times and cache TTL are fully configurable  
-✅ **Comprehensive Testing**: Full integration test suite with Testcontainers  
+✅ **Distributed Lock-Based Caching**: Prevents cache stampede across multiple service instances
+✅ **Flexible Key Generation**: Supports both SpEL expressions and custom `KeyGenerator` beans
+✅ **Conditional Caching**: Control when to cache using `condition` and `unless` expressions
+✅ **Complex Object Support**: SpEL expressions work with nested properties, method calls, and domain objects
+✅ **Spring-Compatible API**: Familiar syntax for developers using Spring's `@Cacheable`
+✅ **Configurable Timeouts**: Lock wait times and cache TTL are fully configurable
+✅ **Comprehensive Testing**: Full integration test suite with Testcontainers
 ✅ **Production-Ready**: Handles edge cases, timeouts, and error scenarios
 
 ## Prerequisites
@@ -167,6 +169,78 @@ public class BookService {
 }
 ```
 
+### Using Conditional Caching
+
+**1. Don't cache null results:**
+
+```java
+@Service
+public class ProductService {
+    
+    @DistributedCacheable(
+        value = "products",
+        key = "#productId",
+        unless = "#result == null"  // Don't cache null results
+    )
+    public Product getProduct(String productId) {
+        return database.findProduct(productId); // May return null
+    }
+}
+```
+
+**2. Only cache for valid parameters:**
+
+```java
+@Service
+public class UserService {
+    
+    @DistributedCacheable(
+        value = "users",
+        key = "#userId",
+        condition = "#userId != null && #userId.length() > 0"
+    )
+    public User getUser(String userId) {
+        return database.findUser(userId);
+    }
+}
+```
+
+**3. Combine condition and unless:**
+
+```java
+@Service
+public class DataService {
+
+    @DistributedCacheable(
+        value = "data",
+        key = "#id",
+        condition = "#id != null",                      // Validate input
+        unless = "#result == null || #result.isEmpty()" // Don't cache empty results
+    )
+    public String getData(String id) {
+        return externalApi.fetch(id);
+    }
+}
+```
+
+### Advanced: Complex Objects
+
+The `condition` and `unless` parameters support complex object properties and method calls:
+
+```java
+@DistributedCacheable(
+    value = "books",
+    key = "#book.isbn",
+    condition = "#book.isExpensive()",              // Method call
+    unless = "#result == null || #result.isEmpty()" // Complex validation
+)
+public Book processBook(Book book) {
+    return expensiveOperation(book);
+}
+```
+
+For detailed examples and patterns, see the [README.md usage guide](README.md#advanced-complex-objects-in-conditional-expressions).
+
 ### Annotation Attributes
 
 | Attribute | Type | Required | Description |
@@ -175,6 +249,8 @@ public class BookService {
 | `key` | String | Conditional* | SpEL expression for cache key |
 | `keyGenerator` | String | Conditional* | Bean name of custom KeyGenerator |
 | `lockTimeout` | long | No | Lock wait timeout in milliseconds (default: 10000) |
+| `condition` | String | No | SpEL expression - cache only if true (evaluated before execution) |
+| `unless` | String | No | SpEL expression - don't cache if true (evaluated after execution) |
 
 \* *Must specify either `key` or `keyGenerator`, but not both*
 
@@ -310,10 +386,11 @@ mvn test
 
 The project includes comprehensive integration tests:
 
-✅ **Cache stampede prevention** - Verifies only one execution with concurrent requests  
-✅ **Different cache keys** - Ensures independent key execution  
-✅ **Cache hits** - Validates cached values are reused  
-✅ **KeyGenerator support** - Tests custom key generation  
+✅ **Cache stampede prevention** - Verifies only one execution with concurrent requests (`CacheStampedeIntegrationTest`)
+✅ **Conditional caching with complex objects** - Tests nested properties, method calls, and complex result validation (`ConditionalCachingTest`)
+✅ **Different cache keys** - Ensures independent key execution
+✅ **Cache hits** - Validates cached values are reused
+✅ **KeyGenerator support** - Tests custom key generation
 ✅ **Validation** - Ensures proper annotation usage  
 
 ### Integration Tests with Testcontainers
@@ -324,7 +401,7 @@ Tests use **Testcontainers** to spin up a real Redis instance:
 @SpringBootTest
 @Import(TestRedisConfiguration.class)
 class CacheStampedeIntegrationTest {
-    
+
     @Test
     void testCacheStampedePrevention_SameKey_OnlyOneExecution() {
         // 10 concurrent threads request same ISBN
@@ -333,6 +410,26 @@ class CacheStampedeIntegrationTest {
     }
 }
 ```
+
+### Test Organization
+
+The project includes two comprehensive integration test suites:
+
+**CacheStampedeIntegrationTest** (18 tests)
+- Focus: Concurrent access and distributed lock behavior
+- Tests cache stampede prevention across multiple threads
+- Validates distributed locking with primitive types
+
+**ConditionalCachingTest** (24 tests)
+- Focus: SpEL conditional expressions with complex objects
+- Tests organized in 4 categories:
+  - Complex object properties (7 tests) - Price conditions, method calls, nested properties
+  - Complex request objects (4 tests) - Request validation, multiple property checks
+  - Complex result objects (5 tests) - Result validation with unless
+  - Combined condition and unless (8 tests) - Both parameters working together
+- Validates nested property access (`#book.author.country`)
+- Tests method calls in conditions (`#book.isExpensive()`)
+- Validates complex result filtering (`#result.isEmpty()`, `#result.hasErrors()`)
 
 ### Manual Testing
 

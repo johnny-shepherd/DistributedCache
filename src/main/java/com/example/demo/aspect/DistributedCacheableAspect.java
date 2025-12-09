@@ -54,6 +54,18 @@ public class DistributedCacheableAspect {
     public Object aroundCacheable(ProceedingJoinPoint joinPoint, 
                                  DistributedCacheable distributedCacheable) throws Throwable {
         
+        // Extract method for condition/unless evaluation
+        MethodSignature signature = (MethodSignature) joinPoint.getSignature();
+        Method method = signature.getMethod();
+        Object[] args = joinPoint.getArgs();
+        
+        // STEP 1: Evaluate 'condition' - if false, skip caching entirely
+        String conditionExpression = distributedCacheable.condition();
+        if (!cacheKeyResolver.evaluateCondition(conditionExpression, method, args)) {
+            logger.debug("[DistributedCacheable] Condition not met, skipping cache - executing method directly");
+            return joinPoint.proceed();
+        }
+        
         // Resolve cache key - either from SpEL or KeyGenerator
         String cacheKey = resolveCacheKey(joinPoint, distributedCacheable);
         String cacheName = distributedCacheable.value();
@@ -103,6 +115,13 @@ public class DistributedCacheableAspect {
                 // Still not in cache - execute method
                 logger.debug("[DistributedCacheable] Cache MISS on double-check, executing method for key: {}", cacheKey);
                 Object result = joinPoint.proceed();
+                
+                // STEP 2: Evaluate 'unless' - if true, don't cache the result
+                String unlessExpression = distributedCacheable.unless();
+                if (cacheKeyResolver.evaluateUnless(unlessExpression, method, args, result)) {
+                    logger.debug("[DistributedCacheable] Unless condition met, not caching result for key: {}", cacheKey);
+                    return result;  // Return without caching
+                }
                 
                 // Cache the result
                 cache.put(cacheKey, result);
